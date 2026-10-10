@@ -79,14 +79,14 @@ class DataLoader:
 class Training_set(DataLoader):
     '''
     It imports all the dataset, merging them using the the index (that will be the date)
-    
+ 
     TO-DO: dataset cleaning and feature engineering
     '''
-    
+ 
     def __init__(self, data_source=None):
         super().__init__(data_source)
-        
-        
+ 
+ 
     def load_copies(self):
         sources = {
             "price": (self.day_ahead_price_data, "date"),
@@ -102,20 +102,33 @@ class Training_set(DataLoader):
                 df.index = df.index.tz_convert(None)
             out[k] = df
         return out
-
+ 
     @cached_property
     def create_dataset(self):
+        '''
+        Hourly input table (all times UTC): index = hour (UTC), columns = price, inflow_*, volume_*, wv_*.
+        '''
         d = self.load_copies()
-
-        price = d["price"].iloc[:, 0]
-        price = price.groupby([price.index.normalize(), price.index.hour]).mean().unstack().add_prefix("price_h")
-
-        X = d["volume"].add_prefix("volume_")
-        X = X.join(d["inflow"].add_prefix("inflow_"))
-        X = X.join(d["wv"].add_prefix("wv_"))
-        X = X.join(price)
-        X = X.join(d["uc"].drop(columns=["Run No", "total_calculation_time"]))
-        return X.loc[:"2025-01-01"]
+ 
+        price = d["price"].iloc[:, 0].resample("h").mean().rename("price")  # 15-min prices (from 2025-09) -> hourly
+        idx = price.loc[:"2025-01-01 00:00"].index
+ 
+        X = price.loc[idx].to_frame()
+        X = X.join(d["inflow"].add_prefix("inflow_"))                        # already hourly
+        X = X.join(d["volume"].add_prefix("volume_").reindex(idx, method="ffill"))
+        X = X.join(d["wv"].add_prefix("wv_").reindex(idx, method="ffill"))
+        return X
+ 
+    @cached_property
+    def create_labels(self):
+        '''
+        UC decisions in long format: index = (starttime, step), columns = units (0/1).
+        '''
+        uc = self.load_copies()["uc"].drop(columns=["Run No", "total_calculation_time"])
+        units = list(dict.fromkeys(c.rsplit("_t", 1)[0].removeprefix("result_committed_") for c in uc.columns))
+        Y = uc.values.reshape(len(uc), len(units), 168).transpose(0, 2, 1).reshape(-1, len(units))
+        idx = pd.MultiIndex.from_product([uc.index, range(168)], names=["starttime", "step"])
+        return pd.DataFrame(Y, index=idx, columns=units)
         
 
 
@@ -131,9 +144,15 @@ if __name__ == "__main__":
     print(DataLoader().min_flow_constraint_data.head())
     print(DataLoader().min_volume_constraint_data.head())
     '''
+    
     # testing the new class
-    print(Training_set().create_dataset.head())
-    d = Training_set().load_copies()
-    for k, v in d.items():
-        print(k, v.index.min(), v.index.max(), v.index.tz)
-
+    ts = Training_set()
+    X, Y = ts.create_dataset, ts.create_labels
+    print(X.shape, Y.shape)
+    print("dataset:", X.index.min(), "->", X.index.max())
+    assert X.index.max() == pd.Timestamp("2025-01-01 00:00"), "dataset must stop at 2025-01-01 00:00"
+    assert X.index.is_monotonic_increasing and X.index.is_unique
+    assert (X.index.to_series().diff().dropna() == pd.Timedelta("1h")).all(), "hourly gaps"
+    print("NaN per column (non zero only):\n", X.isna().sum()[lambda v: v > 0])
+    last = Y.index.get_level_values("starttime").max()
+    print("labels: last case", last, "ends at", last + pd.Timedelta(hours=168))
