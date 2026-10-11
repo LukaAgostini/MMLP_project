@@ -4,6 +4,8 @@
 from functools import cached_property
 from pathlib import Path
 import pandas as pd
+import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view as swv
 import yaml
 
 repo_root = Path(__file__).resolve().parents[1]
@@ -79,8 +81,6 @@ class DataLoader:
 class Training_set(DataLoader):
     '''
     It imports all the dataset, merging them using the the index (that will be the date)
- 
-    TO-DO: dataset cleaning and feature engineering
     '''
  
     def __init__(self, data_source=None):
@@ -130,6 +130,61 @@ class Training_set(DataLoader):
         idx = pd.MultiIndex.from_product([uc.index, range(168)], names=["starttime", "step"])
         return pd.DataFrame(Y, index=idx, columns=units)
         
+        
+    def create_features(self, starts=None):
+        '''
+        - index = (starttime, step) 
+        - one row per case and hour (all UTC)
+        - starts: case start times
+        - Columns: inputs of the real hour (starttime + step) from create_dataset, 
+                plus week-context features of the case
+                        - price rank
+                        - relative price
+                        - week and day statistics
+                        - water value at end of week
+                        - mean inflow of the week)
+        '''
+        
+        X = self.create_dataset
+        
+        if starts is None:
+            starts = self.create_labels.index.get_level_values("starttime").unique()
+        
+        starts = pd.DatetimeIndex(starts)
+        
+        # real hour of every (case, step)
+        n, step = len(starts), np.tile(np.arange(168), len(starts))
+        hour = np.repeat(starts, 168) + pd.to_timedelta(step, unit="h")           
+        
+        F = X.reindex(hour).set_axis(pd.MultiIndex.from_arrays([np.repeat(starts, 168), step], names=["starttime", "step"]))
+        # per-day value -> its 24 hours
+        rep = lambda a: np.repeat(a, 24, axis=1).ravel()                          
+ 
+        # (cases, 168) prices of each case week
+        P = swv(X.price.values, 168)[X.index.get_indexer(starts)]                
+        D = P.reshape(n, 7, 24)
+        F["step"], F["hour"] = step, step % 24
+        
+        # price rank within the week (0 = cheapest)
+        F["rank"] = (P.argsort(1).argsort(1) / 167).ravel()                       
+        F["price_rel"] = (P - P.mean(1, keepdims=True)).ravel()
+        
+        # weak mean and std
+        F["wk_mean"], F["wk_std"] = np.repeat(P.mean(1), 168), np.repeat(P.std(1), 168)
+        
+        # day statistics
+        F["day_mean"], F["day_max"], F["day_min"] = rep(D.mean(2)), rep(D.max(2)), rep(D.min(2))
+        F["month"] = np.repeat(starts.month, 168)
+ 
+        # water value at end of week
+        wv_end = X.filter(like="wv_").reindex(starts + pd.Timedelta(hours=168)).set_axis(starts).add_suffix("_end")  
+        
+        # mean inflow of the week
+        inflow = X.filter(like="inflow_").rolling(168).mean().shift(-167).reindex(starts).add_suffix("_wk")          
+        
+        # per-case -> per-row
+        C = pd.concat([wv_end, inflow], axis=1).reindex(F.index.get_level_values(0)).set_axis(F.index)               
+        return F.join(C)
 
 
 
