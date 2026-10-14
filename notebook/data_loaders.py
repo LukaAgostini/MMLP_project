@@ -143,14 +143,14 @@ class Training_set(DataLoader):
         return x.copy()
     
     
-    def split_small_data(self, begin_train: str, end_train: str, begin_test: str, end_test: str):
+    def split_small_data(self, begin_train:str ='2015-01-01', end_train: str='2018-12-31', begin_test: str='2019-01-12', end_test: str='2019-12-31'):
         '''
         Return X and Y dataset
         Input:
-            - beginnig_train (str): strart date training, format 'yyyy-mm-dd'
-            - beginnig_test (str): strart date testing, format 'yyyy-mm-dd'
-            - end_train (str): end date of training, format 'yyyy-mm-dd'
-            - end_test (str): end date of testing, format 'yyyy-mm-dd'
+            - beginnig_train (str, dafault=2015-01-01 ): strart date training, format 'yyyy-mm-dd'
+            - beginnig_test (str, dafault=2018-12-31 ): strart date testing, format 'yyyy-mm-dd'
+            - end_train (str, dafault=2019-01-01 ): end date of training, format 'yyyy-mm-dd'
+            - end_test (str, dafault=2019-12-31 ): end date of testing, format 'yyyy-mm-dd'
         '''
         X = self.create_x()
         Y = self.y
@@ -158,7 +158,7 @@ class Training_set(DataLoader):
         y_train = Y.loc[begin_train:end_train]
         x_test = X.loc[begin_test:end_test]
         y_test = Y.loc[begin_test:end_test]
-        return x_train, y_train, x_test, y_test
+        return x_train.copy(), y_train.copy(), x_test.copy(), y_test.copy()
 
 if __name__ == "__main__":
     DataLoader()
