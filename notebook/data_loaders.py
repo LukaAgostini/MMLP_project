@@ -4,6 +4,8 @@
 from functools import cached_property
 from pathlib import Path
 import pandas as pd
+import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view as swv
 import yaml
 
 repo_root = Path(__file__).resolve().parents[1]
@@ -69,6 +71,66 @@ class DataLoader:
         return self._yaml("extended", "Tokke_Vinje_topology.yaml")
 
 
+
+# Class to create the entire dataset in one go
+class Training_set(DataLoader):
+    '''
+    It imports all the dataset, merging them using the the index (that will be the date)
+    
+    TODO: simplify this process (or delete)
+    '''
+ 
+    def __init__(self, data_source=None):
+        super().__init__(data_source)
+ 
+ 
+    def load_copies(self):
+        sources = {
+            "day_ahead_price": self.day_ahead_price_data,
+            "inflow": self.inflow_data,
+            "volume": self.volume_data,
+            "wv": self.synthetic_water_value_data,
+            "uc": self.commitment_decision_data,
+        }
+        return sources
+ 
+ 
+    def create_x(self):
+        '''
+        Create the complete X dataset
+        '''
+        
+        data = self.load_copies()
+        
+        # setting the date as index and fixing the columns names
+        for name in data.keys():
+            if 'date' in list(data[name].columns):
+                data[name]['date'] = pd.to_datetime(data[name]['date'], utc=True)
+                data[name] = data[name].set_index(data[name]['date']).drop(columns='date')
+                if 'Day-ahead price (EUR/MWh)' in data[name].columns:
+                    data[name].columns = data[name].columns.str.replace(r'\s*\([^)]*\)', '', regex=True).str.replace(r'[\s-]+', '_', regex=True).str.lower()
+                else:
+                    data[name].columns = data[name].columns.str.lower().str.replace(' ', '_s')
+                
+            else:
+                data[name]['starttime'] = pd.to_datetime(data[name]['starttime'], utc=True)
+                data[name] = data[name].set_index(data[name]['starttime']).drop(columns='starttime')
+                data[name].columns = data[name].columns.str.lower().str.replace(' ', '_')
+
+        
+        # creating the two datset
+        #   y stored for future use
+        self.y = data['uc']
+        data.pop('uc')
+        x = data['day_ahead_price']
+        data.pop('day_ahead_price')
+        for name in data.keys():
+                x = x.join(data[name].add_suffix('_' + name), how='left')
+                
+        
+        return x.copy()
+
+
     ## Other functions
     def get_cached_property_data_attr(self):
         """
@@ -112,3 +174,6 @@ if __name__ == "__main__":
         print(f"\nUnable to load data for the following attributes:\n{error_string}")
     else:
         print("All data loaded successfully.")
+    ts = Training_set()
+    X = ts.create_x()
+    print(X.head(5))
