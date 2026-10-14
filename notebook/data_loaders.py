@@ -14,6 +14,7 @@ data_dir = repo_root / "sintef_project" / "data"
 
 class DataLoader:
     # TODO: Change timestamp data from string to datatime object if available in the data source.
+    # TODO: move this in the notebooks (or make it simpler/remove it)
 
     def __init__(self, data_source=None):
         self.data_source = Path(data_source) if data_source else data_dir
@@ -81,6 +82,8 @@ class DataLoader:
 class Training_set(DataLoader):
     '''
     It imports all the dataset, merging them using the the index (that will be the date)
+    
+    TODO: simplify this process (or delete)
     '''
  
     def __init__(self, data_source=None):
@@ -89,103 +92,49 @@ class Training_set(DataLoader):
  
     def load_copies(self):
         sources = {
-            "price": (self.day_ahead_price_data, "date"),
-            "inflow": (self.inflow_data, "date"),
-            "volume": (self.volume_data, "date"),
-            "wv": (self.synthetic_water_value_data, "date"),
-            "uc": (self.commitment_decision_data, "starttime"),
+            "day_ahead_price": self.day_ahead_price_data,
+            "inflow": self.inflow_data,
+            "volume": self.volume_data,
+            "wv": self.synthetic_water_value_data,
+            "uc": self.commitment_decision_data,
         }
-        out = {}
-        for k, (df, col) in sources.items():
-            df = df.copy().set_index(col)
-            if df.index.tz is not None:
-                df.index = df.index.tz_convert(None)
-            out[k] = df
-        return out
+        return sources
  
-    @cached_property
-    def create_dataset(self):
-        '''
-        Hourly input table (all times UTC): index = hour (UTC), columns = price, inflow_*, volume_*, wv_*.
-        '''
-        d = self.load_copies()
  
-        price = d["price"].iloc[:, 0].resample("h").mean().rename("price")  # 15-min prices (from 2025-09) -> hourly
-        idx = price.loc[:"2025-01-01 00:00"].index
- 
-        X = price.loc[idx].to_frame()
-        X = X.join(d["inflow"].add_prefix("inflow_"))                        # already hourly
-        X = X.join(d["volume"].add_prefix("volume_").reindex(idx, method="ffill"))
-        X = X.join(d["wv"].add_prefix("wv_").reindex(idx, method="ffill"))
-        return X
- 
-    @cached_property
-    def create_labels(self):
+    def create_x(self):
         '''
-        UC decisions in long format: index = (starttime, step), columns = units (0/1).
-        '''
-        uc = self.load_copies()["uc"].drop(columns=["Run No", "total_calculation_time"])
-        units = list(dict.fromkeys(c.rsplit("_t", 1)[0].removeprefix("result_committed_") for c in uc.columns))
-        Y = uc.values.reshape(len(uc), len(units), 168).transpose(0, 2, 1).reshape(-1, len(units))
-        idx = pd.MultiIndex.from_product([uc.index, range(168)], names=["starttime", "step"])
-        return pd.DataFrame(Y, index=idx, columns=units)
-        
-        
-    def create_features(self, starts=None):
-        '''
-        - index = (starttime, step) 
-        - one row per case and hour (all UTC)
-        - starts: case start times
-        - Columns: inputs of the real hour (starttime + step) from create_dataset, 
-                plus week-context features of the case
-                        - price rank
-                        - relative price
-                        - week and day statistics
-                        - water value at end of week
-                        - mean inflow of the week)
+        Create the complete X dataset
         '''
         
-        X = self.create_dataset
+        data = self.load_copies()
         
-        if starts is None:
-            starts = self.create_labels.index.get_level_values("starttime").unique()
-        
-        starts = pd.DatetimeIndex(starts)
-        
-        # real hour of every (case, step)
-        n, step = len(starts), np.tile(np.arange(168), len(starts))
-        hour = np.repeat(starts, 168) + pd.to_timedelta(step, unit="h")           
-        
-        F = X.reindex(hour).set_axis(pd.MultiIndex.from_arrays([np.repeat(starts, 168), step], names=["starttime", "step"]))
-        # per-day value -> its 24 hours
-        rep = lambda a: np.repeat(a, 24, axis=1).ravel()                          
- 
-        # (cases, 168) prices of each case week
-        P = swv(X.price.values, 168)[X.index.get_indexer(starts)]                
-        D = P.reshape(n, 7, 24)
-        F["step"], F["hour"] = step, step % 24
-        
-        # price rank within the week (0 = cheapest)
-        F["rank"] = (P.argsort(1).argsort(1) / 167).ravel()                       
-        F["price_rel"] = (P - P.mean(1, keepdims=True)).ravel()
-        
-        # weak mean and std
-        F["wk_mean"], F["wk_std"] = np.repeat(P.mean(1), 168), np.repeat(P.std(1), 168)
-        
-        # day statistics
-        F["day_mean"], F["day_max"], F["day_min"] = rep(D.mean(2)), rep(D.max(2)), rep(D.min(2))
-        F["month"] = np.repeat(starts.month, 168)
- 
-        # water value at end of week
-        wv_end = X.filter(like="wv_").reindex(starts + pd.Timedelta(hours=168)).set_axis(starts).add_suffix("_end")  
-        
-        # mean inflow of the week
-        inflow = X.filter(like="inflow_").rolling(168).mean().shift(-167).reindex(starts).add_suffix("_wk")          
-        
-        # per-case -> per-row
-        C = pd.concat([wv_end, inflow], axis=1).reindex(F.index.get_level_values(0)).set_axis(F.index)               
-        return F.join(C)
+        # setting the date as index and fixing the columns names
+        for name in data.keys():
+            if 'date' in list(data[name].columns):
+                data[name]['date'] = pd.to_datetime(data[name]['date'], utc=True)
+                data[name] = data[name].set_index(data[name]['date']).drop(columns='date')
+                if 'Day-ahead price (EUR/MWh)' in data[name].columns:
+                    data[name].columns = data[name].columns.str.replace(r'\s*\([^)]*\)', '', regex=True).str.replace(r'[\s-]+', '_', regex=True).str.lower()
+                else:
+                    data[name].columns = data[name].columns.str.lower().str.replace(' ', '_s')
+                
+            else:
+                data[name]['starttime'] = pd.to_datetime(data[name]['starttime'], utc=True)
+                data[name] = data[name].set_index(data[name]['starttime']).drop(columns='starttime')
+                data[name].columns = data[name].columns.str.lower().str.replace(' ', '_')
 
+        
+        # creating the two datset
+        #   y stored for future use
+        self.y = data['uc']
+        data.pop('uc')
+        x = data['day_ahead_price']
+        data.pop('day_ahead_price')
+        for name in data.keys():
+                x = x.join(data[name].add_suffix('_' + name), how='left')
+                
+        
+        return x.copy()
 
 
 if __name__ == "__main__":
@@ -202,12 +151,5 @@ if __name__ == "__main__":
     
     # testing the new class
     ts = Training_set()
-    X, Y = ts.create_dataset, ts.create_labels
-    print(X.shape, Y.shape)
-    print("dataset:", X.index.min(), "->", X.index.max())
-    assert X.index.max() == pd.Timestamp("2025-01-01 00:00"), "dataset must stop at 2025-01-01 00:00"
-    assert X.index.is_monotonic_increasing and X.index.is_unique
-    assert (X.index.to_series().diff().dropna() == pd.Timedelta("1h")).all(), "hourly gaps"
-    print("NaN per column (non zero only):\n", X.isna().sum()[lambda v: v > 0])
-    last = Y.index.get_level_values("starttime").max()
-    print("labels: last case", last, "ends at", last + pd.Timedelta(hours=168))
+    X = ts.create_x()
+    print(X.head(5))
