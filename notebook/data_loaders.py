@@ -82,8 +82,6 @@ class DataLoader:
 class Training_set(DataLoader):
     '''
     It imports all the dataset, merging them using the the index (that will be the date)
-    
-    TODO: simplify this process (or delete)
     '''
  
     def __init__(self, data_source=None):
@@ -104,6 +102,9 @@ class Training_set(DataLoader):
     def create_x(self):
         '''
         Create the complete X dataset
+        
+        TODO: feature engineering and selection
+                + time split for easier computation (test model on smaller data)
         '''
         
         data = self.load_copies()
@@ -123,10 +124,15 @@ class Training_set(DataLoader):
                 data[name] = data[name].set_index(data[name]['starttime']).drop(columns='starttime')
                 data[name].columns = data[name].columns.str.lower().str.replace(' ', '_')
 
+        # wv and volume have daily data
+        #   need to repet thier value hourly
+        hourly = data['day_ahead_price'].index
+        for name in ('volume', 'wv'):
+            data[name] = data[name].reindex(hourly, method='ffill')
         
         # creating the two datset
         #   y stored for future use
-        self.y = data['uc']
+        self.y = data['uc'].copy()
         data.pop('uc')
         x = data['day_ahead_price']
         data.pop('day_ahead_price')
@@ -135,7 +141,24 @@ class Training_set(DataLoader):
                 
         
         return x.copy()
-
+    
+    
+    def split_small_data(self, begin_train: str, end_train: str, begin_test: str, end_test: str):
+        '''
+        Return X and Y dataset
+        Input:
+            - beginnig_train (str): strart date training, format 'yyyy-mm-dd'
+            - beginnig_test (str): strart date testing, format 'yyyy-mm-dd'
+            - end_train (str): end date of training, format 'yyyy-mm-dd'
+            - end_test (str): end date of testing, format 'yyyy-mm-dd'
+        '''
+        X = self.create_x()
+        Y = self.y
+        x_train = X.loc[begin_train:end_train]
+        y_train = Y.loc[begin_train:end_train]
+        x_test = X.loc[begin_test:end_test]
+        y_test = Y.loc[begin_test:end_test]
+        return x_train, y_train, x_test, y_test
 
 if __name__ == "__main__":
     DataLoader()
@@ -153,3 +176,5 @@ if __name__ == "__main__":
     ts = Training_set()
     X = ts.create_x()
     print(X.head(5))
+    x_train, y_train, x_test, y_test = ts.split_small_data('2018-01-01', '2018-12-31', '2019-01-01', '2019-12-31')
+    print(x_train.head(5),'\n', y_train.head(5),'\n',  x_test.head(5),'\n',  y_test.head(5))
