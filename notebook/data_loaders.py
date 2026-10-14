@@ -13,33 +13,51 @@ data_dir = repo_root / "sintef_project" / "data"
 
 
 def build_cases(X, Y, T=168):
-        '''
-        Modify the dataset to have them case indexed
-        Input:
-            - X: x dataset
-            - Y: y datset
-        '''
-        
-        # splitting between daily and hourly features
-        hourly = ['day_ahead_price'] + [c for c in X.columns if c.endswith('_inflow')]
-        vol = [c for c in X.columns if c.endswith('_volume')]
-        wv  = [c for c in X.columns if c.endswith('_wv')]
+    '''
+    Modify the dataset to have them case indexed
+    Input:
+    - X: x dataset
+    - Y: y dataset
+    '''
+    
+    # splitting between daily and hourly features
+    hourly = ['day_ahead_price'] + [c for c in X.columns if c.endswith('_inflow')]
+    vol = [c for c in X.columns if c.endswith('_volume')]
+    wv  = [c for c in X.columns if c.endswith('_wv')]
 
-        # getting the postion of every case starting hour
-        pos = X.index.get_indexer(Y.index)
-        assert (pos >= 0).all() and (pos + T < len(X)).all()
+    # getting the position of every case starting hour
+    pos = X.index.get_indexer(Y.index)
+    # Nota: se non usi pos + T, per la sliding window di lunghezza T basta pos + T <= len(X)
+    assert (pos >= 0).all() and (pos + T <= len(X)).all()
 
-        # creating the sliding windows
-        win = swv(X[hourly].to_numpy(np.float32), T, axis=0)       
-        xh = win[pos].reshape(len(pos), -1)                        
-        wv_arr = X[wv].to_numpy()
-        xs = np.hstack([X[vol].to_numpy()[pos],                    # initial volume
-                        wv_arr[pos]])                              # initial water value
+    # creating the sliding windows
+    win = swv(X[hourly].to_numpy(np.float32), T, axis=0)       
+    xh = win[pos].reshape(len(pos), -1)                        
+    
+    wv_arr = X[wv].to_numpy()
+    xs = np.hstack([
+        X[vol].to_numpy()[pos],  # initial volume (s) -> 17 colonne
+        wv_arr[pos]              # initial water value (s) -> 17 colonne
+    ])
 
-        # excluding run_no e total_calculation_time
-        y = pd.DataFrame(Y.filter(like='result_committed').to_numpy(np.uint8))
-        x = pd.DataFrame(np.hstack([xh, xs]).astype(np.float32))
-        return x, y
+    #  getting the names for the columns fo x
+    hourly_cols = [f"{c}_t{h}" for c in hourly for h in range(T)]
+    all_cols = hourly_cols + vol + wv
+
+    # excluding run_no e total_calculation_time
+    y = pd.DataFrame(
+        Y.filter(like='result_committed').to_numpy(np.uint8),
+        index=Y.index,
+        columns=Y.columns[2:]
+    )
+    
+    x = pd.DataFrame(
+        np.hstack([xh, xs]).astype(np.float32),
+        index=Y.index,
+        columns=all_cols
+    )
+    
+    return x, y
 
 
 class DataLoader:
@@ -173,7 +191,6 @@ class Training_set(DataLoader):
         
         self.x = x.copy()
     
-
     
     def split_small_data(self, begin_train:str ='2015-01-01', end_train: str='2018-12-31', begin_test: str='2019-01-12', end_test: str='2019-12-31'):
         '''
@@ -184,6 +201,8 @@ class Training_set(DataLoader):
             - end_train (str, dafault=2019-01-01 ): end date of training, format 'yyyy-mm-dd'
             - end_test (str, dafault=2019-12-31 ): end date of testing, format 'yyyy-mm-dd'
         '''
+        
+        self.create_x()
         X, Y = self.x.copy(), self.y.copy()
         x_train, y_train = build_cases(X, Y.loc[begin_train:end_train])
         x_test,  y_test  = build_cases(X, Y.loc[begin_test:end_test])
@@ -206,6 +225,7 @@ if __name__ == "__main__":
     ts.create_x()
     X_1 = ts.x
     print(X_1.head(5))
+    print(X_1.shape)
     
-    x_train, y_train, x_test, y_test = ts.split_small_data()
-    print(x_train.head(5),'\n', y_train.head(5),'\n',  x_test.head(5),'\n',  y_test.head(5))
+    #x_train, y_train, x_test, y_test = ts.split_small_data()
+    #print(x_train.head(5),'\n', y_train.head(5),'\n',  x_test.head(5),'\n',  y_test.head(5))
