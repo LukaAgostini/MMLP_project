@@ -98,25 +98,13 @@ class DataLoader:
 
 
 if __name__ == "__main__":
-    DataLoader()
+    loader = DataLoader()
 
-    # test all data loading methods
-    attributes = [
-        "day_ahead_price_data",
-        "inflow_data",
-        "volume_data",
-        "synthetic_water_value_data",
-        "commitment_decision_data",
-        "min_flow_constraint_data",
-        "min_volume_constraint_data",
-        "topology_data",
-    ]
 
     error_string = ""
-
-    for attr in attributes:
+    for attr in loader.get_cached_property_data_attr():
         try:
-            _ = getattr(DataLoader(), attr)
+            _ = getattr(loader, attr)
         except Exception as e:
             error_string += f"{attr},\n"
 
