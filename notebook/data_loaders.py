@@ -27,8 +27,7 @@ def build_cases(X, Y, T=168):
 
     # getting the position of every case starting hour
     pos = X.index.get_indexer(Y.index)
-    # Nota: se non usi pos + T, per la sliding window di lunghezza T basta pos + T <= len(X)
-    assert (pos >= 0).all() and (pos + T <= len(X)).all()
+    assert (pos >= 0).all() and (pos + T < len(X)).all()
 
     # creating the sliding windows
     win = swv(X[hourly].to_numpy(np.float32), T, axis=0)       
@@ -36,13 +35,17 @@ def build_cases(X, Y, T=168):
     
     wv_arr = X[wv].to_numpy()
     xs = np.hstack([
-        X[vol].to_numpy()[pos],  # initial volume (s) -> 17 colonne
-        wv_arr[pos]              # initial water value (s) -> 17 colonne
+        X[vol].to_numpy()[pos],  # initial volume (s)
+        wv_arr[pos],             # initial water value (pos)
+        wv_arr[pos + T]          # final water value (pos+T)
     ])
 
-    #  getting the names for the columns fo x
+    # getting the names for the columns of x
     hourly_cols = [f"{c}_t{h}" for c in hourly for h in range(T)]
-    all_cols = hourly_cols + vol + wv
+    wv_init_cols = [f"{c}_init" for c in wv]
+    wv_final_cols = [f"{c}_final" for c in wv]
+    
+    all_cols = hourly_cols + vol + wv_init_cols + wv_final_cols
 
     # excluding run_no e total_calculation_time
     y = pd.DataFrame(
@@ -166,7 +169,7 @@ class Training_set(DataLoader):
                 if 'Day-ahead price (EUR/MWh)' in data[name].columns:
                     data[name].columns = data[name].columns.str.replace(r'\s*\([^)]*\)', '', regex=True).str.replace(r'[\s-]+', '_', regex=True).str.lower()
                 else:
-                    data[name].columns = data[name].columns.str.lower().str.replace(' ', '_s')
+                    data[name].columns = data[name].columns.str.lower().str.replace(' ', '_')
                 
             else:
                 data[name]['starttime'] = pd.to_datetime(data[name]['starttime'], utc=True)
