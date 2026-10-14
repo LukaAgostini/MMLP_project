@@ -12,6 +12,36 @@ repo_root = Path(__file__).resolve().parents[1]
 data_dir = repo_root / "sintef_project" / "data"
 
 
+def build_cases(X, Y, T=168):
+        '''
+        Modify the dataset to have them case indexed
+        Input:
+            - X: x dataset
+            - Y: y datset
+        '''
+        
+        # splitting between daily and hourly features
+        hourly = ['day_ahead_price'] + [c for c in X.columns if c.endswith('_inflow')]
+        vol = [c for c in X.columns if c.endswith('_volume')]
+        wv  = [c for c in X.columns if c.endswith('_wv')]
+
+        # getting the postion of every case starting hour
+        pos = X.index.get_indexer(Y.index)
+        assert (pos >= 0).all() and (pos + T < len(X)).all()
+
+        # creating the sliding windows
+        win = swv(X[hourly].to_numpy(np.float32), T, axis=0)       
+        xh = win[pos].reshape(len(pos), -1)                        
+        wv_arr = X[wv].to_numpy()
+        xs = np.hstack([X[vol].to_numpy()[pos],                    # initial volume
+                        wv_arr[pos]])                              # initial water value
+
+        # excluding run_no e total_calculation_time
+        y = pd.DataFrame(Y.filter(like='result_committed').to_numpy(np.uint8))
+        x = pd.DataFrame(np.hstack([xh, xs]).astype(np.float32))
+        return x, y
+
+
 class DataLoader:
     # TODO: Change timestamp data from string to datatime object if available in the data source.
     # TODO: move this in the notebooks (or make it simpler/remove it)
@@ -86,7 +116,8 @@ class Training_set(DataLoader):
  
     def __init__(self, data_source=None):
         super().__init__(data_source)
- 
+        self.y = None
+        self.x = None
  
     def load_copies(self):
         sources = {
@@ -140,8 +171,9 @@ class Training_set(DataLoader):
                 x = x.join(data[name].add_suffix('_' + name), how='left')
                 
         
-        return x.copy()
+        self.x = x.copy()
     
+
     
     def split_small_data(self, begin_train:str ='2015-01-01', end_train: str='2018-12-31', begin_test: str='2019-01-12', end_test: str='2019-12-31'):
         '''
@@ -152,13 +184,10 @@ class Training_set(DataLoader):
             - end_train (str, dafault=2019-01-01 ): end date of training, format 'yyyy-mm-dd'
             - end_test (str, dafault=2019-12-31 ): end date of testing, format 'yyyy-mm-dd'
         '''
-        X = self.create_x()
-        Y = self.y
-        x_train = X.loc[begin_train:end_train]
-        y_train = Y.loc[begin_train:end_train]
-        x_test = X.loc[begin_test:end_test]
-        y_test = Y.loc[begin_test:end_test]
-        return x_train.copy(), y_train.copy(), x_test.copy(), y_test.copy()
+        X, Y = self.x.copy(), self.y.copy()
+        x_train, y_train = build_cases(X, Y.loc[begin_train:end_train])
+        x_test,  y_test  = build_cases(X, Y.loc[begin_test:end_test])
+        return x_train, y_train, x_test, y_test
 
 if __name__ == "__main__":
     DataLoader()
@@ -174,7 +203,9 @@ if __name__ == "__main__":
     
     # testing the new class
     ts = Training_set()
-    X = ts.create_x()
-    print(X.head(5))
-    x_train, y_train, x_test, y_test = ts.split_small_data('2018-01-01', '2018-12-31', '2019-01-01', '2019-12-31')
+    ts.create_x()
+    X_1 = ts.x
+    print(X_1.head(5))
+    
+    x_train, y_train, x_test, y_test = ts.split_small_data()
     print(x_train.head(5),'\n', y_train.head(5),'\n',  x_test.head(5),'\n',  y_test.head(5))
