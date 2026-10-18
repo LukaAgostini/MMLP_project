@@ -198,6 +198,7 @@ class Training_set(DataLoader):
     def split_small_data(self, begin_train:str ='2015-01-01', end_train: str='2018-12-31', begin_test: str='2019-01-12', end_test: str='2019-12-31'):
         '''
         Return X and Y dataset
+        
         Input:
             - beginnig_train (str, dafault=2015-01-01 ): strart date training, format 'yyyy-mm-dd'
             - beginnig_test (str, dafault=2018-12-31 ): strart date testing, format 'yyyy-mm-dd'
