@@ -7,6 +7,7 @@ from functools import cached_property
 from pathlib import Path
 import pandas as pd
 import yaml
+import numpy as np
 
 repo_root = Path(__file__).resolve().parents[1]
 data_dir = repo_root / "sintef_project" / "data"
@@ -283,7 +284,12 @@ class Training_set(DataLoader, ABC):
                 continue
             case_end = case_start + pd.Timedelta(hours=168)
             window_start = case_start - pd.Timedelta(hours=hour_memory)
-            features = {"Run No": case["Run No"], "starttime": case_start}
+            start_month = case_start.month
+            
+            features = {"Run No": case["Run No"], 
+                "starttime": case_start,
+                "start_month_sin": np.sin(2 * np.pi * start_month / 12),
+                "start_month_cos": np.cos(2 * np.pi * start_month / 12)}
             complete = True
             for name, frame in categorized["hourly"].items():
                 prefix = "" if name == "day_ahead_price" else f"{name}_" # Manual override for the price for better naming consistency
