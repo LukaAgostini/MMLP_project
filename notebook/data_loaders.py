@@ -290,6 +290,7 @@ class Training_set(DataLoader, ABC):
                 "starttime": case_start,
                 "start_month_sin": np.sin(2 * np.pi * start_month / 12),
                 "start_month_cos": np.cos(2 * np.pi * start_month / 12)}
+            
             complete = True
             for name, frame in categorized["hourly"].items():
                 prefix = "" if name == "day_ahead_price" else f"{name}_" # Manual override for the price for better naming consistency
@@ -328,18 +329,14 @@ class Training_set(DataLoader, ABC):
         target_dir.mkdir(parents=True, exist_ok=True)
 
         x_csv_path = target_dir / "X_summary.csv"
-        y_csv_path = target_dir / "y_summary.csv"
-
-        # Export CSVs first
         X.to_csv(x_csv_path, index=False)
-        y.to_csv(y_csv_path, index=False)
-
-        # Get file sizes in MB
         x_size_mb = x_csv_path.stat().st_size / (1024 * 1024)
-        y_size_mb = y_csv_path.stat().st_size / (1024 * 1024)
+        
+        if y is not None:
+            y_csv_path = target_dir / "y_summary.csv"
+            y.to_csv(y_csv_path, index=False)
+            y_size_mb = y_csv_path.stat().st_size / (1024 * 1024)
 
-
-        # Extract base names and native resolutions
         feature_resolutions = {}
         for col in X.columns:
             if "_t" in col and col.rsplit("_t", 1)[1].lstrip("-").isdigit():
@@ -351,22 +348,20 @@ class Training_set(DataLoader, ABC):
             else:
                 feature_resolutions[col] = "single"
 
-
-        # Write summary file
         with open(target_dir / "summary.txt", "w") as f:
             f.write(f"Summary of the feature and target matrices for the dataset for the {self.__class__.__name__} class:\n")
             f.write(f"The data spans from {X['starttime'].min()} to {X['starttime'].max()}\n")
             f.write(f"Feature matrix dimensions: {X.shape}\n")
-            f.write(f"Target matrix dimensions: {y.shape}\n")
             f.write(f"Feature matrix CSV size: {x_size_mb:.2f} MB\n")
-            f.write(f"Target matrix CSV size: {y_size_mb:.2f} MB\n")
+            
+            if y is not None:
+                f.write(f"Target matrix dimensions: {y.shape}\n")
+                f.write(f"Target matrix CSV size: {y_size_mb:.2f} MB\n")
 
             f.write("\n-------------------------------------------------------------------------\n\n")
             f.write("Feature matrix column categories:\n")
             for base_name, resolution in feature_resolutions.items():
-                f.write(f"  {base_name} - {resolution}\n")
-
-
+                f.write(f"  {base_name}: {resolution}\n")
 
             f.write("\n-------------------------------------------------------------------------\n\n")
             f.write("Row starttimes:\n")
@@ -378,10 +373,11 @@ class Training_set(DataLoader, ABC):
             for col in X.columns:
                 f.write(f"  {col}: {X[col].dtype}\n")
 
-            f.write("\n-------------------------------------------------------------------------\n\n")
-            f.write("Target columns:\n")
-            for col in y.columns:
-                f.write(f"  {col}: {y[col].dtype}\n")
+            if y is not None:
+                f.write("\n-------------------------------------------------------------------------\n\n")
+                f.write("Target columns:\n")
+                for col in y.columns:
+                    f.write(f"  {col}: {y[col].dtype}\n")
 
 class Training_set_example(Training_set):
     """Training set using only hourly price history as model input."""
