@@ -1,0 +1,20 @@
+Date: 2026-10-27 16:32:15.328780
+Context: Model using XGBoost with engineered features: daily relative price, economic spreads (price - vaterva), water value forward differences, and cyclical time features.
+Average CV ROC-AUC: 0.8480
+Final Test ROC-AUC (2022): 0.8541
+----------------------------------------
+Date: 2026-10-27 16:45:35.927351
+Context: Model using XGBoost with engineered features: daily relative price, economic spreads (price - water_values), water value forward differences, and cyclical time features.
+Average CV ROC-AUC: 0.8596
+Final Test ROC-AUC (2022): 0.8663
+----------------------------------------
+Date: 2026-10-27 16:57:38.136570
+Context: Model using XGBoost with engineered features: daily relative price, economic spreads (price - water_values), water value forward differences, and cyclical time features.
+Average CV ROC-AUC: 0.8596
+Final Test ROC-AUC (2022): 0.8663
+----------------------------------------
+Date: 2026-10-27 17:15:23.814757
+Context: Model using XGBoost with engineered features: daily relative price, economic spreads (price - water_values), water value forward differences, and cyclical time features. Uses a memory of 24 hours and uses a commitment lag of 1 hour.
+Average CV ROC-AUC: 0.6313
+Final Test ROC-AUC (2022): 0.7807
+----------------------------------------

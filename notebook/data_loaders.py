@@ -235,8 +235,14 @@ class Training_set(DataLoader, ABC):
         end_date: datetime,
         hour_memory: int = 168,
         include_constraints: bool = False,
+        prediction_mapping_path: str | Path | None = None,
     ):
-        """Create model-ready feature and target matrices from this dataset."""
+        """Create model-ready features and optional targets.
+
+        If ``prediction_mapping_path`` is provided, runs are read from that
+        mapping and the returned target frame is empty. This supports
+        unlabeled prediction periods such as the Kaggle test horizon.
+        """
         if hour_memory < 0:
             raise ValueError("hour_memory must be non-negative")
         selection_start = self._timestamp(start_date)
@@ -276,17 +282,38 @@ class Training_set(DataLoader, ABC):
         if not target_cols:
             raise ValueError("No result_committed target columns were found")
 
+        if prediction_mapping_path is None:
+            cases = (
+                (run_no, case, True)
+                for run_no, case in decisions.iterrows()
+            )
+        else:
+            mapping = pd.read_csv(prediction_mapping_path)
+            required_mapping_columns = {"Run No", "starttime"}
+            if not required_mapping_columns.issubset(mapping.columns):
+                raise ValueError(
+                    "Prediction mapping must contain 'Run No' and 'starttime'."
+                )
+            mapping["starttime"] = pd.to_datetime(mapping["starttime"])
+            cases = (
+                (
+                    row["starttime"],
+                    pd.Series({"Run No": row["Run No"]}),
+                    False,
+                )
+                for _, row in mapping.iterrows()
+            )
+
         feature_rows = []
         target_rows = []
-        for run_no, case in decisions.iterrows():
-            case_start = run_no
+        for case_start, case, has_target in cases:
             if not (selection_start <= case_start <= selection_end):
                 continue
             case_end = case_start + pd.Timedelta(hours=168)
             window_start = case_start - pd.Timedelta(hours=hour_memory)
             start_month = case_start.month
             
-            features = {"Run No": case["Run No"], 
+            features = {"Run No": case["Run No"],
                 "starttime": case_start,
                 "start_month_sin": np.sin(2 * np.pi * start_month / 12),
                 "start_month_cos": np.cos(2 * np.pi * start_month / 12)}
@@ -314,7 +341,8 @@ class Training_set(DataLoader, ABC):
                 )
             if complete:
                 feature_rows.append(features)
-                target_rows.append(case[target_cols].to_dict())
+                if has_target:
+                    target_rows.append(case[target_cols].to_dict())
 
         X = pd.DataFrame(feature_rows)
         y = pd.DataFrame(target_rows, columns=target_cols)
