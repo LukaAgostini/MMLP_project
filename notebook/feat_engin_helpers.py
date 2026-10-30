@@ -93,25 +93,60 @@ def read_timeseries(path, date_col="date"):
     d[date_col] = _utc_naive(d[date_col])
     return d.set_index(date_col).sort_index()
 
+def attach_unit_specific(long, df_units, name, level="hourly",
+                         offset_days=0, unit_map=None):
+    cats = long["unit"].cat.categories
+    cols = [unit_map[c] for c in cats] if unit_map else list(cats)
+    missing = [c for c in cols if c not in df_units.columns]
+    if missing:
+        raise KeyError(f"No column in df_units for: {missing}")
+
+    arr = df_units[cols].to_numpy(dtype=np.float32)   # columns now in cats order
+
+    if level == "hourly":
+        key = long["timestamp"]
+    elif level == "daily":
+        key = long["timestamp"].dt.floor("D")
+    elif level == "case":
+        start = long["timestamp"] - pd.to_timedelta(long["hour"].astype("int64"), unit="h")
+        key = start.dt.floor("D") + pd.Timedelta(days=offset_days)
+    else:
+        raise ValueError(level)
+
+    t_pos = df_units.index.get_indexer(key)
+    u_pos = long["unit"].cat.codes.to_numpy()
+    out = np.full(len(long), np.nan, dtype=np.float32)
+    ok = t_pos >= 0
+    out[ok] = arr[t_pos[ok], u_pos[ok]]
+    long[name] = out
+    return long
+
 # Calculate correlations
 
 def filter_scores(df, feature_cols, target_col):
-    y = df[target_col].values
-    if y.min() == y.max():
-        return None
+    METRICS = ["correlation", "auc", "strength", "sign_consistency", "frac_missing"]
+    cols = ["feature"] + METRICS
+    if df[target_col].nunique() < 2:                     # constant target
+        return pd.DataFrame(columns=cols)
     rows = []
     for f in feature_cols:
-        x = df[f].values
-        mask = ~np.isnan(x)
-        if np.nanstd(x) == 0:
+        d = df[[f, target_col, "year"]].dropna()
+        # constant feature (e.g. Hyljelihyl / Vatjern storage) -> no information, skip
+        if d[target_col].nunique() < 2 or d[f].nunique() < 2:
             continue
-        rho = spearmanr(x[mask], y[mask]).correlation
-        auc = roc_auc_score(y[mask], x[mask])
+        x, y = d[f].to_numpy(), d[target_col].to_numpy()
+        auc = roc_auc_score(y, x)
         per_year = [roc_auc_score(g[target_col], g[f])
-                    for _, g in df.groupby("year")
+                    for _, g in d.groupby("year")
                     if g[target_col].nunique() == 2 and g[f].nunique() > 1]
-        rows.append(dict(feature=f, correlation=rho, auc=auc,
-                         strength=abs(auc - 0.5),
-                         sign_consistency=np.mean(np.sign(np.array(per_year) - 0.5)
-                                                  == np.sign(auc - 0.5))))
-    return pd.DataFrame(rows).sort_values("strength", ascending=False)
+        rows.append(dict(
+            feature=f,
+            correlation=spearmanr(x, y).correlation,
+            auc=auc,
+            strength=abs(auc - 0.5),
+            sign_consistency=(np.mean(np.sign(np.array(per_year) - 0.5) == np.sign(auc - 0.5))
+                              if per_year else np.nan),
+            frac_missing=1 - len(d) / len(df),
+        ))
+    # fixed columns, so an empty result is still a valid (empty) DataFrame
+    return pd.DataFrame(rows, columns=cols).sort_values("strength", ascending=False)
