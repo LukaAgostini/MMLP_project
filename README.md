@@ -1,6 +1,6 @@
 # MLMP_project
 
-Moder machine learning in practice: group project repo.
+Moder machine learning in practice: group project repo, see docs >> Report_Group26
 
 ## Getting Started
 
