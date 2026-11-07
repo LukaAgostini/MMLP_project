@@ -10,7 +10,7 @@ To get a local copy of this public repository, open your terminal and run the fo
 
 ```bash
 git clone https://github.com/LukaAgostini/MLMP_project.git
-cd MLMP_project
+cd MMLP_project
 ```
 
 ### 2. Environment Setup
